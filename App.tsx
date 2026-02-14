@@ -43,7 +43,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Save
+  Save,
+  Play
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
 import { Video, AdConfig, Settings, Page, AdCampaign, GlobalAdSettings, PlayerSettings } from './types';
@@ -196,8 +197,16 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [editingVideo, setEditingVideo] = useState<Video | null>(null);
   const [demoVideo, setDemoVideo] = useState<Video | null>(null);
+  
+  // Modals
   const [showEmbedModal, setShowEmbedModal] = useState<Video | null>(null);
+  const [videoToDelete, setVideoToDelete] = useState<Video | null>(null);
+  
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+
+  // --- EMBED MODE STATE ---
+  const [isEmbedMode, setIsEmbedMode] = useState(false);
+  const [embedVideoData, setEmbedVideoData] = useState<Video | null>(null);
 
   // Apply Theme Class
   useEffect(() => {
@@ -207,6 +216,23 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  // Check for Embed Parameters on Mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode');
+    const videoId = params.get('id');
+
+    if (mode === 'embed' && videoId) {
+       const foundVideo = videos.find(v => v.id === videoId) || MOCK_VIDEOS.find(v => v.id === videoId);
+       if (foundVideo) {
+         setEmbedVideoData(foundVideo);
+         setIsEmbedMode(true);
+         // Force dark mode for player
+         document.documentElement.classList.add('dark');
+       }
+    }
+  }, [videos]);
 
   // --- LOGIC: GET EFFECTIVE ADS (Combines Manual + Global) ---
   const getEffectiveAds = (video: Video): AdConfig[] => {
@@ -250,6 +276,23 @@ export default function App() {
     return effectiveAds.sort((a,b) => a.startTime - b.startTime);
   };
 
+  // --- RENDER EMBED PLAYER ONLY ---
+  if (isEmbedMode && embedVideoData) {
+    const videoWithAds = {
+      ...embedVideoData,
+      ads: getEffectiveAds(embedVideoData)
+    };
+    return (
+      <div className="w-screen h-screen bg-black overflow-hidden flex items-center justify-center">
+        <CustomVideoPlayer 
+          video={videoWithAds} 
+          settings={playerSettings} 
+          autoPlay={true} 
+        />
+      </div>
+    );
+  }
+
   // --- HANDLERS ---
   const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -284,10 +327,15 @@ export default function App() {
     setVideos(videos.map(v => v.id === id ? { ...v, status: v.status === 'active' ? 'inactive' : 'active' } : v));
   };
 
-  // Delete Video Handler
-  const deleteVideo = (id: string) => {
-    if (confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
-      setVideos(videos.filter(v => v.id !== id));
+  // Delete Video Logic
+  const initiateDelete = (video: Video) => {
+    setVideoToDelete(video);
+  };
+
+  const confirmDelete = () => {
+    if (videoToDelete) {
+      setVideos(videos.filter(v => v.id !== videoToDelete.id));
+      setVideoToDelete(null);
     }
   };
 
@@ -527,7 +575,7 @@ export default function App() {
                           <button onClick={() => setShowEmbedModal(video)} className="p-2 hover:bg-gray-200 dark:hover:bg-neutral-700 rounded dark:text-neutral-400 text-gray-600 dark:hover:text-white hover:text-gray-900" title="Get Embed Code">
                             <Share2 size={18} />
                           </button>
-                          <button onClick={() => deleteVideo(video.id)} className="p-2 hover:bg-red-900/30 rounded text-red-500 hover:text-red-400" title="Delete Video">
+                          <button onClick={() => initiateDelete(video)} className="p-2 hover:bg-red-900/30 rounded text-red-500 hover:text-red-400" title="Delete Video">
                             <Trash2 size={18} />
                           </button>
                         </div>
@@ -591,8 +639,9 @@ export default function App() {
     const [duration, setDuration] = useState(0);
 
     const handleSubmit = () => {
-      if (!title || !url || !thumbnail) {
-        alert("Please fill in all fields.");
+      // Made thumbnail and duration optional to fix user issue
+      if (!title || !url) {
+        alert("Please enter at least a Title and Video Source URL.");
         return;
       }
 
@@ -600,8 +649,9 @@ export default function App() {
         id: Date.now().toString(),
         title,
         url,
-        thumbnail,
-        duration: duration || 600, // Default 10 min if not specified
+        // Use provided thumbnail or a default random one
+        thumbnail: thumbnail || `https://picsum.photos/800/450?random=${Date.now()}`,
+        duration: duration || 0, // 0 indicates unknown/auto
         views: 0,
         uploadDate: new Date().toISOString().split('T')[0],
         status: 'active',
@@ -629,18 +679,19 @@ export default function App() {
 
            <div className="space-y-6">
               <div>
-                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Video Title</label>
+                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Video Title <span className="text-red-500">*</span></label>
                  <input 
                    type="text" 
                    value={title} 
                    onChange={(e) => setTitle(e.target.value)}
                    className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 px-4 dark:text-white text-gray-900 outline-none focus:border-red-600"
                    placeholder="e.g. My Awesome Video"
+                   required
                  />
               </div>
 
               <div>
-                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Video Source URL (R2/S3 Direct Link)</label>
+                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Video Source URL (R2/S3 Direct Link) <span className="text-red-500">*</span></label>
                  <div className="relative">
                     <Server className="absolute left-3 top-3 dark:text-neutral-500 text-gray-400" size={18} />
                     <input 
@@ -649,13 +700,14 @@ export default function App() {
                       onChange={(e) => setUrl(e.target.value)}
                       className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 pl-10 dark:text-white text-gray-900 outline-none focus:border-red-600"
                       placeholder="https://pub-xxxx.r2.dev/video.mp4"
+                      required
                     />
                  </div>
                  <p className="text-xs dark:text-neutral-500 text-gray-500 mt-2">Make sure the file is public or the URL contains a valid token.</p>
               </div>
 
               <div>
-                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Thumbnail URL</label>
+                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Thumbnail URL <span className="text-neutral-500 text-xs">(Optional)</span></label>
                  <div className="relative">
                     <Image className="absolute left-3 top-3 dark:text-neutral-500 text-gray-400" size={18} />
                     <input 
@@ -669,7 +721,7 @@ export default function App() {
               </div>
 
               <div>
-                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Duration (Seconds)</label>
+                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Duration (Seconds) <span className="text-neutral-500 text-xs">(Optional)</span></label>
                  <div className="relative">
                     <Clock className="absolute left-3 top-3 dark:text-neutral-500 text-gray-400" size={18} />
                     <input 
@@ -677,7 +729,7 @@ export default function App() {
                       value={duration} 
                       onChange={(e) => setDuration(parseInt(e.target.value))}
                       className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 pl-10 dark:text-white text-gray-900 outline-none focus:border-red-600"
-                      placeholder="600"
+                      placeholder="0 (Auto-detect)"
                     />
                  </div>
               </div>
@@ -703,358 +755,379 @@ export default function App() {
   };
 
   const EditVideoPage = () => {
-    if (!editingVideo) {
-      setCurrentPage('videos');
-      return null;
-    }
+    const [formState, setFormState] = useState<Video>(editingVideo!);
+    
+    if (!editingVideo) return <div className="p-8 text-center text-gray-500">No video selected for editing.</div>;
 
-    const [title, setTitle] = useState(editingVideo.title);
-    const [url, setUrl] = useState(editingVideo.url);
-    const [thumbnail, setThumbnail] = useState(editingVideo.thumbnail);
-    const [duration, setDuration] = useState(editingVideo.duration);
-
-    const handleSubmit = () => {
-      const updatedVideos = videos.map(v => 
-        v.id === editingVideo.id 
-          ? { ...v, title, url, thumbnail, duration }
-          : v
-      );
-      setVideos(updatedVideos);
-      setCurrentPage('videos');
-      setEditingVideo(null);
+    const handleSave = () => {
+        setVideos(videos.map(v => v.id === formState.id ? formState : v));
+        setCurrentPage('videos');
+        setEditingVideo(null);
     };
 
     return (
-      <div className="max-w-2xl mx-auto space-y-8 animate-fade-in">
-        <h2 className="text-2xl font-bold dark:text-white text-gray-900 flex items-center gap-2">
-          <Edit className="text-blue-500" /> Edit Video
-        </h2>
-        
-        <div className="dark:bg-neutral-900 bg-white p-8 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
-           <div>
-              <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Video Title</label>
-              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 px-4 dark:text-white text-gray-900 outline-none focus:border-red-600" />
-           </div>
-           <div>
-              <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Video Source URL</label>
-              <input type="text" value={url} onChange={(e) => setUrl(e.target.value)} className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 px-4 dark:text-white text-gray-900 outline-none focus:border-red-600" />
-           </div>
-           <div>
-              <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Thumbnail URL</label>
-              <input type="text" value={thumbnail} onChange={(e) => setThumbnail(e.target.value)} className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 px-4 dark:text-white text-gray-900 outline-none focus:border-red-600" />
-           </div>
-           <div>
-              <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Duration (Seconds)</label>
-              <input type="number" value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg py-3 px-4 dark:text-white text-gray-900 outline-none focus:border-red-600" />
-           </div>
-           
-           <div className="mt-8 flex justify-end gap-4">
-              <button onClick={() => setCurrentPage('videos')} className="px-6 py-3 rounded-lg dark:text-neutral-400 text-gray-600 hover:bg-gray-100 dark:hover:bg-neutral-800 transition">Cancel</button>
-              <button onClick={handleSubmit} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg flex items-center gap-2">
-                 <Save size={18}/> Save Changes
-              </button>
-           </div>
+        <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+             <div className="flex items-center gap-4 mb-6">
+                <button onClick={() => setCurrentPage('videos')} className="p-2 hover:bg-gray-200 dark:hover:bg-neutral-800 rounded-full"><ChevronLeft className="dark:text-white" size={24} /></button>
+                <h2 className="text-2xl font-bold dark:text-white text-gray-900">Edit Video</h2>
+             </div>
+             <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 space-y-4 shadow-sm">
+                <div>
+                    <label className="block text-sm font-medium dark:text-gray-400 text-gray-700 mb-1">Title</label>
+                    <input className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white text-gray-900" value={formState.title} onChange={e => setFormState({...formState, title: e.target.value})} />
+                </div>
+                 <div>
+                    <label className="block text-sm font-medium dark:text-gray-400 text-gray-700 mb-1">URL</label>
+                    <input className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white text-gray-900" value={formState.url} onChange={e => setFormState({...formState, url: e.target.value})} />
+                </div>
+                 <div>
+                    <label className="block text-sm font-medium dark:text-gray-400 text-gray-700 mb-1">Thumbnail</label>
+                    <input className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white text-gray-900" value={formState.thumbnail} onChange={e => setFormState({...formState, thumbnail: e.target.value})} />
+                </div>
+                <div className="pt-4 flex justify-end gap-3">
+                    <button onClick={() => setCurrentPage('videos')} className="px-4 py-2 rounded border dark:border-neutral-700 border-gray-300 dark:text-white text-gray-700 hover:bg-gray-100 dark:hover:bg-neutral-800">Cancel</button>
+                    <button onClick={handleSave} className="bg-red-600 text-white px-6 py-2 rounded font-bold hover:bg-red-700 transition">Save Changes</button>
+                </div>
+             </div>
         </div>
-      </div>
-    );
-  };
+    )
+  }
+
+  const PlayerDemoPage = () => {
+      if (!demoVideo) return <div className="p-8 text-center text-gray-500">No video loaded.</div>;
+      
+      const videoWithAds = {
+          ...demoVideo,
+          ads: getEffectiveAds(demoVideo)
+      };
+
+      return (
+          <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
+              <button onClick={() => setCurrentPage('videos')} className="flex items-center gap-2 dark:text-white text-gray-900 hover:text-red-500 font-medium"><ChevronLeft /> Back to Videos</button>
+              <div className="aspect-video border dark:border-neutral-800 border-gray-300 rounded-lg overflow-hidden shadow-2xl bg-black">
+                  <CustomVideoPlayer video={videoWithAds} settings={playerSettings} autoPlay={true} />
+              </div>
+              <div className="p-4 dark:bg-neutral-900 bg-white rounded-lg border dark:border-neutral-800 border-gray-200">
+                  <h1 className="text-xl font-bold dark:text-white text-gray-900">{demoVideo.title}</h1>
+                  <p className="text-sm text-gray-500 mt-2">Preview Mode</p>
+              </div>
+          </div>
+      )
+  }
 
   const AnalyticsPage = () => {
-    const data = [
-      { name: 'Mon', views: 4000, revenue: 2400 },
-      { name: 'Tue', views: 3000, revenue: 1398 },
-      { name: 'Wed', views: 2000, revenue: 9800 },
-      { name: 'Thu', views: 2780, revenue: 3908 },
-      { name: 'Fri', views: 1890, revenue: 4800 },
-      { name: 'Sat', views: 2390, revenue: 3800 },
-      { name: 'Sun', views: 3490, revenue: 4300 },
+      const data = [
+          { name: 'Mon', views: 4000, revenue: 240 },
+          { name: 'Tue', views: 3000, revenue: 139 },
+          { name: 'Wed', views: 2000, revenue: 980 },
+          { name: 'Thu', views: 2780, revenue: 390 },
+          { name: 'Fri', views: 1890, revenue: 480 },
+          { name: 'Sat', views: 2390, revenue: 380 },
+          { name: 'Sun', views: 3490, revenue: 430 },
+      ];
+      return (
+          <div className="space-y-6 animate-fade-in">
+              <h2 className="text-2xl font-bold dark:text-white text-gray-900">Analytics</h2>
+              <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 h-96 shadow-sm">
+                  <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={data}>
+                          <defs>
+                              <linearGradient id="colorViews" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
+                                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                              </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke={theme === 'dark' ? "#333" : "#eee"} />
+                          <XAxis dataKey="name" stroke="#888" />
+                          <YAxis stroke="#888" />
+                          <Tooltip 
+                            contentStyle={{
+                                backgroundColor: theme === 'dark' ? '#000' : '#fff', 
+                                borderColor: theme === 'dark' ? '#333' : '#ccc',
+                                borderRadius: '8px',
+                                color: theme === 'dark' ? '#fff' : '#000'
+                            }} 
+                          />
+                          <Area type="monotone" dataKey="views" stroke="#ef4444" fillOpacity={1} fill="url(#colorViews)" />
+                      </AreaChart>
+                  </ResponsiveContainer>
+              </div>
+          </div>
+      )
+  }
+
+  const AdManagerPage = () => (
+      <div className="space-y-6 animate-fade-in">
+          <h2 className="text-2xl font-bold dark:text-white text-gray-900">Global Ad Manager</h2>
+          <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
+              <div className="flex items-center justify-between">
+                  <span className="dark:text-white text-gray-900 font-medium">Enable Global Ads</span>
+                  <button 
+                    onClick={() => setGlobalAdSettings({...globalAdSettings, enabled: !globalAdSettings.enabled})}
+                    className={`w-12 h-6 rounded-full relative transition-colors ${globalAdSettings.enabled ? 'bg-green-500' : 'bg-gray-400'}`}
+                  >
+                      <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${globalAdSettings.enabled ? 'translate-x-7' : 'translate-x-1'}`} />
+                  </button>
+              </div>
+              <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">Ad Interval (Minutes)</label>
+                  <input 
+                    type="number" 
+                    value={globalAdSettings.intervalMinutes}
+                    onChange={(e) => setGlobalAdSettings({...globalAdSettings, intervalMinutes: parseInt(e.target.value)})}
+                    className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white"
+                  />
+              </div>
+              <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">Video Source URL</label>
+                  <input 
+                    type="text" 
+                    value={globalAdSettings.videoSrc}
+                    onChange={(e) => setGlobalAdSettings({...globalAdSettings, videoSrc: e.target.value})}
+                    className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white"
+                  />
+              </div>
+              <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">Redirect URL</label>
+                  <input 
+                    type="text" 
+                    value={globalAdSettings.redirectUrl}
+                    onChange={(e) => setGlobalAdSettings({...globalAdSettings, redirectUrl: e.target.value})}
+                    className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white"
+                  />
+              </div>
+          </div>
+      </div>
+  );
+
+  const PlayerSettingsPage = () => (
+      <div className="space-y-6 animate-fade-in">
+          <h2 className="text-2xl font-bold dark:text-white text-gray-900">Player Branding</h2>
+          <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
+               <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">Primary Color</label>
+                  <div className="flex gap-4 items-center">
+                    <input 
+                        type="color" 
+                        value={playerSettings.primaryColor}
+                        onChange={(e) => setPlayerSettings({...playerSettings, primaryColor: e.target.value})}
+                        className="h-10 w-20 rounded border border-gray-300"
+                    />
+                    <span className="text-sm dark:text-gray-500 text-gray-500">{playerSettings.primaryColor}</span>
+                  </div>
+              </div>
+               <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">Logo Watermark URL</label>
+                  <input 
+                    type="text" 
+                    value={playerSettings.logoUrl}
+                    onChange={(e) => setPlayerSettings({...playerSettings, logoUrl: e.target.value})}
+                    placeholder="https://example.com/logo.png"
+                    className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white"
+                  />
+              </div>
+          </div>
+      </div>
+  );
+
+  const SettingsPage = () => (
+      <div className="space-y-6 animate-fade-in">
+          <h2 className="text-2xl font-bold dark:text-white text-gray-900">Site Settings</h2>
+          <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
+              <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">Site Name</label>
+                  <input 
+                    type="text" 
+                    value={settings.siteName}
+                    onChange={(e) => setSettings({...settings, siteName: e.target.value})}
+                    className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white"
+                  />
+              </div>
+              <div className="flex items-center gap-4">
+                  <input 
+                    type="checkbox" 
+                    checked={settings.allowSignup}
+                    onChange={(e) => setSettings({...settings, allowSignup: e.target.checked})}
+                    id="allowSignup"
+                  />
+                  <label htmlFor="allowSignup" className="dark:text-white text-gray-900">Allow Public Registration</label>
+              </div>
+          </div>
+      </div>
+  );
+
+  const SmtpPage = () => (
+      <div className="space-y-6 animate-fade-in">
+          <h2 className="text-2xl font-bold dark:text-white text-gray-900">SMTP Configuration</h2>
+           <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
+              <div className="space-y-2">
+                  <label className="block text-sm dark:text-gray-400 text-gray-600">SMTP Host</label>
+                  <input type="text" value={settings.smtpHost} className="w-full p-2 rounded dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 dark:text-white" disabled />
+              </div>
+              <p className="text-sm text-yellow-500">SMTP Settings are read-only in this demo.</p>
+           </div>
+      </div>
+  );
+
+  const Sidebar = () => {
+    const navItems: {id: Page, label: string, icon: any}[] = [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'analytics', label: 'Analytics', icon: BarChart2 },
+        { id: 'videos', label: 'Videos', icon: VideoIcon },
+        { id: 'ad-manager', label: 'Ad Manager', icon: DollarSign },
+        { id: 'player-settings', label: 'Player Branding', icon: Palette },
+        { id: 'settings', label: 'Site Settings', icon: SettingsIcon },
+        { id: 'smtp', label: 'SMTP Config', icon: Mail },
     ];
 
     return (
-      <div className="space-y-6 animate-fade-in">
-        <h2 className="text-2xl font-bold dark:text-white text-gray-900">Analytics</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-           <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm">
-              <h3 className="mb-4 text-lg font-semibold dark:text-white text-gray-900">Views Overview</h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data}>
-                    <defs>
-                      <linearGradient id="colorViews" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="name" stroke="#9ca3af" />
-                    <YAxis stroke="#9ca3af" />
-                    <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040' }} />
-                    <Area type="monotone" dataKey="views" stroke="#ef4444" fillOpacity={1} fill="url(#colorViews)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-           </div>
-           {/* Revenue Chart */}
-           <div className="dark:bg-neutral-900 bg-white p-6 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm">
-              <h3 className="mb-4 text-lg font-semibold dark:text-white text-gray-900">Revenue</h3>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="name" stroke="#9ca3af" />
-                    <YAxis stroke="#9ca3af" />
-                    <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #404040' }} />
-                    <Bar dataKey="revenue" fill="#10b981" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-           </div>
-        </div>
-      </div>
-    );
-  };
+        <aside className={`${sidebarOpen ? 'w-64' : 'w-20'} bg-black border-r border-neutral-800 flex flex-col transition-all duration-300 z-50 shrink-0`}>
+            <div className="p-6 flex items-center gap-3 border-b border-neutral-800 h-20">
+                <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-900 rounded-lg flex items-center justify-center text-white font-bold text-xl shrink-0">S</div>
+                {sidebarOpen && <span className="font-bold text-xl tracking-tight text-white whitespace-nowrap overflow-hidden">StreamFlow</span>}
+            </div>
+            
+            <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
+                {navItems.map(item => (
+                    <button 
+                    key={item.id}
+                    onClick={() => setCurrentPage(item.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group ${currentPage === item.id ? 'bg-red-600 text-white shadow-lg shadow-red-900/20' : 'text-neutral-400 hover:bg-neutral-900 hover:text-white'}`}
+                    title={item.label}
+                    >
+                        <item.icon size={20} className={`shrink-0 ${currentPage === item.id ? 'text-white' : 'text-neutral-500 group-hover:text-white transition-colors'}`} />
+                        {sidebarOpen && <span className="font-medium whitespace-nowrap overflow-hidden">{item.label}</span>}
+                    </button>
+                ))}
+            </nav>
 
-  const PlayerSettingsPage = () => {
-     return (
-        <div className="max-w-4xl mx-auto animate-fade-in space-y-6">
-           <h2 className="text-2xl font-bold dark:text-white text-gray-900">Player Branding & Settings</h2>
-           <div className="dark:bg-neutral-900 bg-white p-8 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
-              <div>
-                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Primary Color</label>
-                 <div className="flex items-center gap-4">
-                    <input type="color" value={playerSettings.primaryColor} onChange={(e) => setPlayerSettings({...playerSettings, primaryColor: e.target.value})} className="h-10 w-20 rounded cursor-pointer" />
-                    <span className="dark:text-white text-gray-900">{playerSettings.primaryColor}</span>
-                 </div>
-              </div>
-              <div>
-                 <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Logo URL (Watermark)</label>
-                 <input type="text" value={playerSettings.logoUrl} onChange={(e) => setPlayerSettings({...playerSettings, logoUrl: e.target.value})} className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg p-3 dark:text-white text-gray-900 outline-none focus:border-red-600" placeholder="https://..." />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Logo Position</label>
-                    <select value={playerSettings.logoPosition} onChange={(e) => setPlayerSettings({...playerSettings, logoPosition: e.target.value as any})} className="w-full dark:bg-black bg-gray-50 border dark:border-neutral-700 border-gray-300 rounded-lg p-3 dark:text-white text-gray-900 outline-none focus:border-red-600">
-                       <option value="top-left">Top Left</option>
-                       <option value="top-right">Top Right</option>
-                       <option value="bottom-left">Bottom Left</option>
-                       <option value="bottom-right">Bottom Right</option>
-                    </select>
-                 </div>
-                 <div>
-                    <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Logo Opacity</label>
-                    <input type="range" min="0" max="1" step="0.1" value={playerSettings.logoOpacity} onChange={(e) => setPlayerSettings({...playerSettings, logoOpacity: parseFloat(e.target.value)})} className="w-full" />
-                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                 <input type="checkbox" checked={playerSettings.autoPlay} onChange={(e) => setPlayerSettings({...playerSettings, autoPlay: e.target.checked})} className="w-4 h-4 text-red-600 rounded" />
-                 <label className="dark:text-white text-gray-900">Auto-play videos by default</label>
-              </div>
-              <div className="pt-4 border-t dark:border-neutral-800 border-gray-200">
-                 <h3 className="text-lg font-bold dark:text-white text-gray-900 mb-4">Preview</h3>
-                 <div className="max-w-md">
-                   <CustomVideoPlayer video={MOCK_VIDEOS[0]} settings={playerSettings} />
-                 </div>
-              </div>
-           </div>
-        </div>
-     );
-  };
-
-  const AdManagerPage = () => {
-    return (
-      <div className="animate-fade-in space-y-6">
-        <h2 className="text-2xl font-bold dark:text-white text-gray-900">Ad Manager</h2>
-        <div className="dark:bg-neutral-900 bg-white p-8 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
-           <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold dark:text-white text-gray-900">Global Ad Injection</h3>
-              <div className="flex items-center gap-2">
-                <span className="text-sm dark:text-neutral-400 text-gray-600">{globalAdSettings.enabled ? 'Enabled' : 'Disabled'}</span>
-                <button 
-                  onClick={() => setGlobalAdSettings({...globalAdSettings, enabled: !globalAdSettings.enabled})}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${globalAdSettings.enabled ? 'bg-green-600' : 'bg-neutral-600'}`}
-                >
-                   <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform shadow-sm ${globalAdSettings.enabled ? 'translate-x-7' : 'translate-x-1'}`}></div>
+            <div className="p-4 border-t border-neutral-800">
+                <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 text-neutral-400 hover:text-white transition">
+                    <LogOut size={20} className="shrink-0" />
+                    {sidebarOpen && <span className="whitespace-nowrap overflow-hidden">Sign Out</span>}
                 </button>
-              </div>
-           </div>
-
-           {globalAdSettings.enabled && (
-             <div className="space-y-4 p-4 rounded-lg bg-gray-50 dark:bg-black/20 border dark:border-neutral-800 border-gray-200">
-                <div>
-                   <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Injection Interval (Minutes)</label>
-                   <input type="number" value={globalAdSettings.intervalMinutes} onChange={(e) => setGlobalAdSettings({...globalAdSettings, intervalMinutes: parseInt(e.target.value)})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-2 dark:text-white text-gray-900" />
-                </div>
-                <div>
-                   <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Mode</label>
-                   <select value={globalAdSettings.mode} onChange={(e) => setGlobalAdSettings({...globalAdSettings, mode: e.target.value as any})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-2 dark:text-white text-gray-900">
-                      <option value="direct">Direct Link (Simple)</option>
-                      <option value="campaign">Campaign Based</option>
-                   </select>
-                </div>
-                
-                {globalAdSettings.mode === 'direct' ? (
-                   <>
-                     <div>
-                       <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Ad Video URL</label>
-                       <input type="text" value={globalAdSettings.videoSrc} onChange={(e) => setGlobalAdSettings({...globalAdSettings, videoSrc: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-2 dark:text-white text-gray-900" />
-                     </div>
-                     <div>
-                       <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Redirect URL</label>
-                       <input type="text" value={globalAdSettings.redirectUrl} onChange={(e) => setGlobalAdSettings({...globalAdSettings, redirectUrl: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-2 dark:text-white text-gray-900" />
-                     </div>
-                   </>
-                ) : (
-                   <div>
-                       <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Select Campaign</label>
-                       <select value={globalAdSettings.campaignId} onChange={(e) => setGlobalAdSettings({...globalAdSettings, campaignId: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-2 dark:text-white text-gray-900">
-                          <option value="">-- Select Campaign --</option>
-                          {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                       </select>
-                   </div>
-                )}
-             </div>
-           )}
-        </div>
-      </div>
+            </div>
+        </aside>
     );
   };
-
-  const SettingsPage = () => {
-    return (
-      <div className="max-w-4xl mx-auto animate-fade-in space-y-6">
-        <h2 className="text-2xl font-bold dark:text-white text-gray-900">General Settings</h2>
-        <div className="dark:bg-neutral-900 bg-white p-8 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
-            <div>
-               <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">Site Name</label>
-               <input type="text" value={settings.siteName} onChange={(e) => setSettings({...settings, siteName: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-white text-gray-900 outline-none" />
-            </div>
-            <div className="flex items-center gap-2">
-               <input type="checkbox" checked={settings.allowSignup} onChange={(e) => setSettings({...settings, allowSignup: e.target.checked})} className="w-4 h-4" />
-               <label className="dark:text-white text-gray-900">Allow User Registration</label>
-            </div>
-            <div className="flex items-center gap-2">
-               <input type="checkbox" checked={settings.maintenanceMode} onChange={(e) => setSettings({...settings, maintenanceMode: e.target.checked})} className="w-4 h-4" />
-               <label className="dark:text-white text-gray-900">Maintenance Mode</label>
-            </div>
-        </div>
-      </div>
-    );
-  };
-
-  const SMTPPage = () => {
-    return (
-       <div className="max-w-4xl mx-auto animate-fade-in space-y-6">
-        <h2 className="text-2xl font-bold dark:text-white text-gray-900">SMTP Configuration</h2>
-        <div className="dark:bg-neutral-900 bg-white p-8 rounded-xl border dark:border-neutral-800 border-gray-200 shadow-sm space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">SMTP Host</label>
-                <input type="text" value={settings.smtpHost} onChange={(e) => setSettings({...settings, smtpHost: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-white text-gray-900 outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">SMTP Port</label>
-                <input type="number" value={settings.smtpPort} onChange={(e) => setSettings({...settings, smtpPort: parseInt(e.target.value)})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-white text-gray-900 outline-none" />
-              </div>
-            </div>
-            <div>
-                <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">SMTP User</label>
-                <input type="text" value={settings.smtpUser} onChange={(e) => setSettings({...settings, smtpUser: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-white text-gray-900 outline-none" />
-            </div>
-            <div>
-                <label className="block text-sm font-medium dark:text-neutral-400 text-gray-700 mb-2">SMTP Password</label>
-                <input type="password" value={settings.smtpPass} onChange={(e) => setSettings({...settings, smtpPass: e.target.value})} className="w-full dark:bg-black bg-white border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-white text-gray-900 outline-none" />
-            </div>
-        </div>
-      </div>
-    );
-  };
-
-  if (!user && !['login', 'signup', 'forgot-password'].includes(currentPage)) setCurrentPage('login');
-  if (currentPage === 'login') return <LoginPage />;
-  if (currentPage === 'forgot-password') return <ForgotPasswordPage />;
-  if (currentPage === 'player-demo' && demoVideo) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-5xl"><div className="flex justify-between items-center mb-4"><h2 className="text-white font-bold text-xl">{demoVideo.title} (Preview)</h2><button onClick={() => setCurrentPage('videos')} className="text-neutral-400 hover:text-white flex items-center gap-2"><X size={20} /> Close Preview</button></div>
-        <CustomVideoPlayer 
-          video={demoVideo} 
-          autoPlay 
-          settings={playerSettings} 
-        />
-        <div className="mt-8 text-neutral-500 text-sm"><p>Showing effective ads (Manual + Global if enabled).</p></div></div>
-      </div>
-    );
-  }
 
   return (
-    <div className={`min-h-screen font-sans flex overflow-hidden transition-colors duration-300 ${theme === 'dark' ? 'dark bg-black text-neutral-200' : 'bg-gray-50 text-gray-900'}`}>
-      <aside className={`fixed lg:relative z-20 h-full border-r transition-all duration-300 flex flex-col ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-20 lg:hover:w-64 group'} ${theme === 'dark' ? 'bg-black border-neutral-800' : 'bg-white border-gray-200'}`}>
-        <div className={`h-16 flex items-center px-6 border-b shrink-0 ${theme === 'dark' ? 'border-neutral-800' : 'border-gray-200'}`}>
-          <div className="flex items-center gap-2 text-red-600 font-bold text-xl tracking-tighter"><PlayCircle size={28} /><span className={`lg:group-hover:block ${!sidebarOpen && 'lg:hidden'}`}>StreamFlow</span></div>
-        </div>
-        <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
-          {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-            { id: 'analytics', icon: BarChart2, label: 'Analytics' }, // Moved Analytics here
-            { id: 'videos', icon: VideoIcon, label: 'Videos' },
-            { id: 'player-settings', icon: MonitorPlay, label: 'Player' },
-            { id: 'ad-manager', icon: Megaphone, label: 'Ad Manager' },
-            { id: 'smtp', icon: Mail, label: 'SMTP Config' },
-            { id: 'settings', icon: SettingsIcon, label: 'Settings' },
-          ].map((item) => (
-            <button key={item.id} onClick={() => setCurrentPage(item.id as Page)} className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg transition-colors ${currentPage === item.id ? 'bg-red-600 text-white' : theme === 'dark' ? 'text-neutral-400 hover:bg-neutral-800 hover:text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-              <item.icon size={20} /><span className={`lg:group-hover:block ${!sidebarOpen && 'lg:hidden'}`}>{item.label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className={`p-4 border-t shrink-0 ${theme === 'dark' ? 'border-neutral-800' : 'border-gray-200'}`}>
-           <button onClick={handleLogout} className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg transition-colors ${theme === 'dark' ? 'text-neutral-400 hover:bg-neutral-800 hover:text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
-             <LogOut size={20} /><span className={`lg:group-hover:block ${!sidebarOpen && 'lg:hidden'}`}>Sign Out</span>
-           </button>
-        </div>
-      </aside>
-      <main className={`flex-1 h-screen overflow-y-auto ${theme === 'dark' ? 'bg-[#0a0a0a]' : 'bg-gray-50'}`}>
-        <header className={`h-16 backdrop-blur-md border-b sticky top-0 z-10 flex items-center justify-between px-6 ${theme === 'dark' ? 'bg-black/50 border-neutral-800' : 'bg-white/80 border-gray-200'}`}>
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="lg:hidden p-2 dark:text-white text-gray-900"><Menu size={24} /></button>
-          <div className="flex-1"></div>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`p-2 rounded-full transition-colors ${theme === 'dark' ? 'bg-neutral-800 text-yellow-400 hover:bg-neutral-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-              title="Toggle Theme"
-            >
-              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-            <div className="text-right hidden md:block"><p className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Admin User</p><p className="text-xs text-neutral-500">{user?.email}</p></div>
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-red-600 border ${theme === 'dark' ? 'bg-neutral-800 border-neutral-700' : 'bg-gray-200 border-gray-300'}`}><User size={20} /></div>
-          </div>
-        </header>
-        <div className="p-6 md:p-8 max-w-7xl mx-auto">
-          {currentPage === 'dashboard' && <DashboardPage />}
-          {currentPage === 'videos' && <VideoListPage />}
-          {currentPage === 'player-settings' && <PlayerSettingsPage />}
-          {currentPage === 'ad-manager' && <AdManagerPage />}
-          {currentPage === 'analytics' && <AnalyticsPage />} 
-          {currentPage === 'edit-video' && <EditVideoPage />}
-          {currentPage === 'add-video' && <AddVideoPage />}
-          {currentPage === 'settings' && <SettingsPage />} 
-          {currentPage === 'smtp' && <SMTPPage />}
-        </div>
-      </main>
-      {showEmbedModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="dark:bg-neutral-900 bg-white border dark:border-neutral-700 border-gray-200 p-6 rounded-lg max-w-lg w-full animate-fade-in shadow-xl">
-            <div className="flex justify-between items-center mb-4"><h3 className="dark:text-white text-gray-900 font-bold text-lg">Embed Video</h3><button onClick={() => setShowEmbedModal(null)} className="dark:text-neutral-400 text-gray-500 hover:text-gray-900 dark:hover:text-white"><X size={20} /></button></div>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between items-center mb-2"><label className="text-sm dark:text-neutral-400 text-gray-600">Embed Code</label><button onClick={() => copyToClipboard(`<iframe src="https://player.streamflow.com/embed/${showEmbedModal.id}" width="100%" height="450" frameborder="0" allowfullscreen></iframe>`, 'iframe')} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-400 transition">{copyFeedback === 'iframe' ? <><Check size={12}/> Copied</> : <><Copy size={12}/> Copy Code</>}</button></div>
-                <textarea readOnly className="w-full h-24 dark:bg-black bg-gray-100 border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-neutral-300 text-gray-800 font-mono text-xs focus:border-red-600 outline-none resize-none" value={`<iframe src="https://player.streamflow.com/embed/${showEmbedModal.id}" width="100%" height="450" frameborder="0" allowfullscreen></iframe>`}/>
+    <div className={theme === 'dark' ? 'dark' : ''}>
+      <div className="min-h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-white transition-colors duration-200 font-sans">
+        {/* Auth Check for Render */}
+        {['login', 'signup', 'forgot-password'].includes(currentPage) ? (
+           currentPage === 'forgot-password' ? <ForgotPasswordPage /> : <LoginPage />
+        ) : (
+           <div className="flex h-screen overflow-hidden">
+              <Sidebar />
+              <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                 {/* Top Header */}
+                 <header className="h-20 border-b dark:border-neutral-800 border-gray-200 bg-white/80 dark:bg-black/80 backdrop-blur-sm flex items-center justify-between px-4 lg:px-8 z-40 sticky top-0">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-neutral-800 text-gray-600 dark:text-neutral-400 transition">
+                            <Menu size={20} />
+                        </button>
+                        <h2 className="text-xl font-bold dark:text-white text-gray-900 capitalize hidden sm:block">
+                            {currentPage.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+                        </h2>
+                    </div>
+                    
+                    <div className="flex items-center gap-4 lg:gap-6">
+                        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-neutral-800 text-gray-600 dark:text-neutral-400 transition">
+                            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                        </button>
+                        <div className="flex items-center gap-3 pl-4 lg:pl-6 border-l dark:border-neutral-800 border-gray-200">
+                            <div className="text-right hidden md:block">
+                                <p className="text-sm font-bold dark:text-white text-gray-900">Admin User</p>
+                                <p className="text-xs text-gray-500 dark:text-neutral-500">{user?.email}</p>
+                            </div>
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white font-bold shadow-lg">
+                                A
+                            </div>
+                        </div>
+                    </div>
+                 </header>
+
+                 {/* Main Content Area */}
+                 <main className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth">
+                    {currentPage === 'dashboard' && <DashboardPage />}
+                    {currentPage === 'videos' && <VideoListPage />}
+                    {currentPage === 'add-video' && <AddVideoPage />}
+                    {currentPage === 'edit-video' && <EditVideoPage />}
+                    {currentPage === 'analytics' && <AnalyticsPage />}
+                    {currentPage === 'ad-manager' && <AdManagerPage />}
+                    {currentPage === 'player-settings' && <PlayerSettingsPage />}
+                    {currentPage === 'settings' && <SettingsPage />}
+                    {currentPage === 'smtp' && <SmtpPage />}
+                    {currentPage === 'player-demo' && <PlayerDemoPage />}
+                 </main>
               </div>
-              <p className="text-xs text-neutral-500"><span className="text-red-500">*</span> Includes {globalAdSettings.enabled ? 'Global + Manual' : 'Manual'} ads.</p>
+           </div>
+        )}
+        
+        {/* Modals placed at the root level so they cover everything */}
+        {showEmbedModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="dark:bg-neutral-900 bg-white border dark:border-neutral-700 border-gray-200 p-6 rounded-lg max-w-lg w-full shadow-2xl">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="dark:text-white text-gray-900 font-bold text-lg">Embed Video</h3>
+                <button onClick={() => setShowEmbedModal(null)} className="dark:text-neutral-400 text-gray-500 hover:text-gray-900 dark:hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-sm dark:text-neutral-400 text-gray-600">Embed Code</label>
+                    <button 
+                      onClick={() => copyToClipboard(`<iframe src="${window.location.origin}?mode=embed&id=${showEmbedModal.id}&autoplay=0" width="100%" height="100%" frameborder="0" allowfullscreen allow="encrypted-media"></iframe>`, 'iframe')}
+                      className="flex items-center gap-1 text-xs text-red-500 hover:text-red-400 transition"
+                    >
+                      {copyFeedback === 'iframe' ? <><Check size={12}/> Copied</> : <><Copy size={12}/> Copy Code</>}
+                    </button>
+                  </div>
+                  <textarea 
+                    readOnly 
+                    className="w-full h-24 dark:bg-black bg-gray-100 border dark:border-neutral-700 border-gray-300 rounded p-3 dark:text-neutral-300 text-gray-800 font-mono text-xs focus:border-red-600 outline-none resize-none"
+                    value={`<iframe src="${window.location.origin}?mode=embed&id=${showEmbedModal.id}&autoplay=0" width="100%" height="100%" frameborder="0" allowfullscreen allow="encrypted-media"></iframe>`}
+                  />
+                </div>
+                <p className="text-xs text-neutral-500"><span className="text-red-500">*</span> Includes {globalAdSettings.enabled ? 'Global + Manual' : 'Manual'} ads.</p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {videoToDelete && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="dark:bg-neutral-900 bg-white border dark:border-neutral-700 border-gray-200 p-6 rounded-lg max-w-md w-full shadow-2xl">
+               <div className="flex flex-col items-center text-center space-y-4">
+                  <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mb-2">
+                     <AlertCircle size={32} />
+                  </div>
+                  <h3 className="text-xl font-bold dark:text-white text-gray-900">Delete Video?</h3>
+                  <p className="dark:text-gray-400 text-gray-600 text-sm">
+                     Are you sure you want to delete <span className="font-bold">"{videoToDelete.title}"</span>? This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3 w-full pt-2">
+                     <button 
+                       onClick={() => setVideoToDelete(null)}
+                       className="flex-1 px-4 py-2 rounded-lg border dark:border-neutral-700 border-gray-300 dark:text-white text-gray-700 hover:bg-gray-100 dark:hover:bg-neutral-800 transition"
+                     >
+                       Cancel
+                     </button>
+                     <button 
+                       onClick={confirmDelete}
+                       className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 transition"
+                     >
+                       Delete
+                     </button>
+                  </div>
+               </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
